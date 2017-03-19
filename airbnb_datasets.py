@@ -3,8 +3,9 @@ from pyspark.sql import SQLContext
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 from pyspark.sql import *
+#for assigning neighbourhood
 import json
-
+import math
 
 import sys
 reload(sys)
@@ -56,7 +57,7 @@ class airbnb():
         #df = self.spark.read.csv("listings_us.csv", header=True, sep="\t")
         #df = df.sample(False, self.sample_size, 7)
         #df.select("city").show()
-        data = self.sc.textFile("listings_us.csv")
+        data = self.sc.textFile("datasets/listings_us.csv")
         schemaString = data.first()
         #remove header
         data = data.filter(lambda line: line != schemaString)
@@ -77,7 +78,7 @@ class airbnb():
     def get_df_reviews(self):
         #df = self.spark.read.csv("reviews_us.csv", header=True, sep="\t")
         #df = df.sample(False, self.sample_size, 7)
-        data = self.sc.textFile("reviews_us.csv")
+        data = self.sc.textFile("datasets/reviews_us.csv")
         schemaString = data.first()
         #remove header
         data = data.filter(lambda line: line != schemaString)
@@ -97,7 +98,7 @@ class airbnb():
     def get_df_calendar(self):
         #df = self.spark.read.csv("reviews_us.csv", header=True, sep="\t")
         #df = df.sample(False, self.sample_size, 7)
-        data = self.sc.textFile("calendar_us.csv")
+        data = self.sc.textFile("datasets/calendar_us.csv")
         schemaString = data.first()
         #remove header
         data = data.filter(lambda line: line != schemaString)
@@ -115,7 +116,7 @@ class airbnb():
         return df
 
     def get_df_neighborhoods(self):
-        data = self.sc.textFile("neighborhood_test.csv")
+        data = self.sc.textFile("datasets/neighborhood_test.csv")
         schemaString = data.first()
         #remove header
         data = data.filter(lambda line: line != schemaString)
@@ -138,7 +139,7 @@ class airbnb():
         #trim whitespaces
         df = df.withColumn('city', trim(df.city))
         #make lowercase
-        df = df.withColumn('city', lower(df.city))
+        #df = df.withColumn('city', lower(df.city))
 
         #CLEAN COLUMN "price"
         #remove dollar sign
@@ -160,62 +161,183 @@ class airbnb():
         df_neighbourhoods.show()
         return
 
+    #FIND DISTINCT AMENITIES FOR EACH NEIGHBORHOOD(6b)
+    def get_distinctAmenities(self):
+        df_testing = self.get_df_listings()
+        df_listings.select("amenities").show()
+
 
     #COMPARE RESULTS OF NEIGHBORHOOD ALGORITHM(6a)
     def get_neighborhoodComparison(self):
         df_testing = self.get_df_neighborhoods()
         df_testing.show()
 
-        with open('neighbourhoods.geojson') as json_data:
+
+
+        #get coordinates of listings
+        df_listings = self.get_df_listings()
+        coordinates_list = self.spark.sql("SELECT id, latitude, longitude FROM listings").collect()
+
+        #remove testings without neighbourhood
+        #df_testing = df_testing.filter(length("neighbourhood") > 2)
+
+        #only use listings mentioned in testing test
+        #coordinates_list = df_testing.join(df_listings, ['id'])
+
+        #extract limited sample from joined dataframe
+        #coordinates_list.createOrReplaceTempView("joined")
+        #coordinates_list = self.spark.sql("SELECT id, latitude, longitude FROM joined LIMIT 100").collect()
+        #coordinates_list = self.spark.sql("SELECT id, latitude, longitude FROM listings ORDER BY id ASC LIMIT 2").collect()
+
+        #print coordinates_list[0]['id']
+        #coordinates_list.show()
+        #find properties of listing number index
+        #index = 0
+        #listing_id = coordinates_list[index][0]
+        #listing_lat = coordinates_list[index][1]
+        #listing_lon = coordinates_list[index][2]
+
+        with open('datasets/neighbourhoods.geojson') as json_data:
             d = json.load(json_data)
 
-            features = d['features']
-            one_sample = features[0]
-            print one_sample
-            return
-            geometry = one_sample['geometry']
-            properties = one_sample['properties']
-
-            coordinates = geometry['coordinates']
-            neighbourhood_group = properties['neighbourhood_group']
-            neighbourhood = properties['neighbourhood']
-
-        return
         #just setting up pseudo.
         #coordinates_list are list of coordinates to be assigned to neighbourhoods
         #need dict containing coordinates with key as listing_id
         #result is dict or list with listing_id, neighbourhood_group(city?) and neighbourhood
         #testing sample given by lecturer contains city as well
         #I believe neighbourhood_group equals city
+
+        #use small sample
         features = d['features']
+        #features = features[:10]
+        #print features[0]['properties']
+
+        #print coordinates_list[0][0]
+
+        #for listing in coordinates_list:
+        #    if listing["id"] == 3335:
+        #        print "found it"
+
+        #should contain all coordinates to assign neighbourhood to
+        listing_neighbourhood = {}
         for coordinates_listing in coordinates_list:
-            for instance in features:
-                geometry = instance['geometry']
-                coordinates_instance = geometry['coordinates']
+
+            #testing only
+            current_listing_id = coordinates_listing["id"]
+
+            print "New listing"
+            for neighbourhood in features:
+                geometry = neighbourhood['geometry']
+                coordinates_neighbourhood = geometry['coordinates'][0][0]
+                properties = neighbourhood['properties']
                 neighbourhood_group = properties['neighbourhood_group']
                 neighbourhood = properties['neighbourhood']
-                if self.isInPolygon(coordinates_listing, coordinates_instance):
-                    listing_neighbourhood.append(listing_id, neighbourhood_group, neighbourhood)
 
+                #make arrays of vertices in direction x(index 0) and y(index 1)
+                vertx = []
+                verty = []
+                for coordinate in coordinates_neighbourhood:
+                    vertx.append(float(coordinate[1]))
+                    verty.append(float(coordinate[0]))
+
+
+                #find number of vertices
+                nvert = len(vertx)
+
+                #print "verty", verty[nvert - 1]
+
+                #set coordinates of listing
+                testx = float(coordinates_listing[1])
+                testy = float(coordinates_listing[2])
+
+                #print "vertx", vertx[0]
+                #print "verty", verty[0]
+                #print "testx", testx
+                #print "testy", testy
+
+                #check if in polygon
+                inPolygon = False
+                c = 0
+                #j = nvert - 1
+                #j = 1
+                j = 1
+                a = 0
+                for i in range(len(verty)):
+                    #print "running for loop"
+                    #print j
+                    #j = i + 1
+                    #if len(verty) >= j:
+                    if (((verty[i] > testy) != (verty[j] > testy)) and (testx < (vertx[j] - vertx[i]) * (testy - verty[i]) / (verty[j] - verty[i]) + vertx[i])):
+                        if c == 0:
+                            c = 1
+                        else:
+                            c = 0
+                        a += 1
+                    j = i + 1
+                #print a
+                if c == 1:
+                    inPolygon = True
+
+                #assign neighbourhood
+                if inPolygon:
+                    print neighbourhood
+                    listing_neighbourhood[current_listing_id] = neighbourhood
+                    break
+
+            #if not inPolygon:
+            #    listing_neighbourhood[current_listing_id] = None
+                #else:
+                #    listing_neighbourhood[current_listing_id] = None
+                #print listing_neighbourhood
+
+        #make dataframe of results
+        df_results = self.sc.parallelize([([k, v]) for k, v in listing_neighbourhood.items()]).toDF(['listings_id', 'assigned_neighbourhood'])
+        df_results.show()
+        #save to file
+        self.save_toFile(df_results, "6a_assign_allListings.csv")
         return
 
-        df_geo = self.spark.read.json("neighbourhoods.geojson")
-        df_geo.printSchema()
+        #join results with testing set
+        df_joined = df_testing.join(df_results, df_results.listings_id == df_testing.id)
+        df_joined.show()
+        return
 
-        geometry = df_geo.select("features").collect()[0][0]
-        print geometry["coordinates"]
+        #make list of testing set
+        neighbourhood_test_list = df_testing.collect()
 
-        '''
-        df_features = df_geo.select("features")
-        df_element = df_features.select("element")
-        df_geometry = df_element("geometry")
-        df_geometry.show()
-        '''
+        #compare results to test set
+        count_match = 0
+        count_foundNew = 0
+        print "\n"
+        for test_case in neighbourhood_test_list:
+            if str(test_case['id']) in listing_neighbourhood:
+                print listing_neighbourhood[str(test_case['id'])]
+                print test_case['neighbourhood']
+                if listing_neighbourhood[str(test_case['id'])] == str(test_case['neighbourhood']):
+                    count_match += 1
+                elif len(test_case['neighbourhood']) < 1:
+                    count_foundNew += 1
 
-        #full_list = df_geo.select("features").collect()
-        #geometry = full_list[0][0]
-        #print geometry
-        #print(full_list[0][0][0])
+        print listing_neighbourhood
+
+        for id, neighbourhood in listing_neighbourhood.items():
+            print id
+            print neighbourhood
+
+        df_result = self.sc.parallelize([([k, v]) for k, v in listing_neighbourhood.items()]).toDF(['id', 'neighbourhood'])
+        #df_result = self.sc.parallelize([(list(k), ) + v[0] for k, v in listing_neighbourhood.items()]).toDF(['key', 'val_1'])
+        df_result.show()
+
+        print "Assigned %d neighbourhoods" % len(listing_neighbourhood)
+        print "Assigned the right neighbourhood %d out of %d times" % (count_match, len(coordinates_list))
+        print "Assigned neighbourhood to %d listings not having neighbourhood in testing set" % (count_foundNew)
+        #print neighbourhood_test_list[0]
+        #print neighbourhood_test_list[0]['neighbourhood']
+        return
+
+        #df_geo = self.spark.read.json("neighbourhoods.geojson")
+        #df_geo.printSchema()
+
 
     #GET THE GUEST THAT SPENT THE MOST MONEY ON ACCOMODATION AND THE AMOUNT(5b)
     def get_mostSpendingGuestAndAmount(self):
@@ -225,7 +347,10 @@ class airbnb():
         df_joined = df_reviews.join(df_listings, df_reviews.listing_id == df_listings.id)
         df_joined.createOrReplaceTempView("joined")
 
-        self.spark.sql("SELECT reviewer_id, reviewer_name, SUM(price) AS amountSpent FROM joined GROUP BY reviewer_id, reviewer_name ORDER BY amountSpent DESC LIMIT 1").show()
+        results = self.spark.sql("SELECT reviewer_id, reviewer_name, SUM(price) AS amountSpent FROM joined GROUP BY reviewer_id, reviewer_name ORDER BY amountSpent DESC LIMIT 1")
+
+        #save to file
+        self.save_toFile(results, "5b.csv")
 
     #GET TOP THREE REVIEWERS FOR EACH CITY(5a)
     def get_topReviewers(self):
@@ -233,8 +358,8 @@ class airbnb():
         #df_calendar = self.get_df_calendar()
         #df_calendar.show()
 
-        #calculate bookings, was DISTINT listing_id
-        self.spark.sql("SELECT reviewer_id, reviewer_name, COUNT(listing_id) AS bookings FROM reviews GROUP BY reviewer_id, reviewer_name ORDER BY bookings DESC").show()
+        #calculate bookings, was DISTINCT listing_id
+        #self.spark.sql("SELECT reviewer_id, reviewer_name, COUNT(listing_id) AS bookings FROM reviews GROUP BY reviewer_id, reviewer_name ORDER BY bookings DESC").show()
         #return
         '''
         output sample = 1:
@@ -280,13 +405,12 @@ class airbnb():
         #df_joined.show()
         df_joined.createOrReplaceTempView("joined")
         #return
+
         #sql
+        results = self.spark.sql("SELECT city, reviewer_id, reviewer_name, bookings FROM (SELECT city, reviewer_id, reviewer_name, bookings, dense_rank() OVER (PARTITION BY city ORDER BY bookings DESC) as rank FROM joined GROUP BY city, reviewer_id, reviewer_name, bookings) tmp WHERE rank <= 3 GROUP BY city, reviewer_id, reviewer_name, bookings")
 
-        self.spark.sql("SELECT city, reviewer_id, reviewer_name, bookings FROM (SELECT city, reviewer_id, reviewer_name, bookings, dense_rank() OVER (PARTITION BY city ORDER BY bookings DESC) as rank FROM joined GROUP BY city, reviewer_id, reviewer_name, bookings) tmp WHERE rank <= 3 GROUP BY city, reviewer_id, reviewer_name, bookings").show()
-        return
-
-        #lacks returning only the top three
-        self.spark.sql("SELECT city, review_count, reviewer_name FROM joined GROUP BY city HAVING COUNT(review_count) < 4, review_count, reviewer_name ORDER BY city DESC, review_count DESC").show(100)
+        #save to file
+        self.save_toFile(results, "5a.csv")
 
     #GET TOP THREE HOSTS WITH HIGHEST INCOME FOR EACH CITY(4c)
     '''
@@ -300,7 +424,7 @@ class airbnb():
 
         #testing new filter
         #df_listings = df_listings.filter($length("price") > 0 || $"price" > 0)
-        df_listings = df_listings.filter(length("price") > 0)
+        #df_listings = df_listings.filter(length("price") > 0)
         df_listings = df_listings.filter("price > 0")
 
         df_calendar = self.get_df_calendar()
@@ -337,13 +461,19 @@ class airbnb():
         #self.spark.sql("SELECT city, host_id, host_name, SUM(price) AS income FROM (SELECT city, host_id, host_name, price, dense_rank() OVER (PARTITION BY city ORDER BY SUM(price) DESC) as rank FROM joined GROUP BY city, host_id, host_name, price) tmp WHERE rank <= 3 GROUP BY city, host_id, host_name").show()
 
         #this works, DONE!
+        #calculate income
         df_joined = self.spark.sql("SELECT city, host_id, host_name, SUM(price) AS income FROM joined GROUP BY city, host_id, host_name ORDER BY income DESC")
+
         df_joined.createOrReplaceTempView("joined")
-        self.spark.sql("SELECT city, host_id, host_name, income FROM (SELECT city, host_id, host_name, income, dense_rank() OVER (PARTITION BY city ORDER BY income DESC) as rank FROM joined GROUP BY city, host_id, host_name, income) tmp WHERE rank <= 3 GROUP BY city, host_id, host_name, income").show()
+        results = self.spark.sql("SELECT city, host_id, host_name, income FROM (SELECT city, host_id, host_name, income, dense_rank() OVER (PARTITION BY city ORDER BY income DESC) as rank FROM joined GROUP BY city, host_id, host_name, income) tmp WHERE rank <= 3 GROUP BY city, host_id, host_name, income ORDER BY city ASC")
+
+        #save to file
+        self.save_toFile(results, "4c.csv")
+
         return
 
         #sql
-        self.spark.sql("SELECT city, host_id, host_name, SUM(price) AS income FROM (SELECT city, host_id, host_name, price, dense_rank() OVER (PARTITION BY city ORDER BY SUM(price) DESC) as rank FROM joined GROUP BY city, host_id, host_name, price) tmp WHERE rank <= 3 GROUP BY city, host_id, host_name").show()
+        #self.spark.sql("SELECT city, host_id, host_name, SUM(price) AS income FROM (SELECT city, host_id, host_name, price, dense_rank() OVER (PARTITION BY city ORDER BY SUM(price) DESC) as rank FROM joined GROUP BY city, host_id, host_name, price) tmp WHERE rank <= 3 GROUP BY city, host_id, host_name").show()
         #self.spark.sql("SELECT city, host_id, host_name, SUM(price) FROM (SELECT city, host_id, host_name, price, dense_rank() OVER (PARTITION BY city ORDER BY SUM(price) DESC) as rank FROM joined GROUP BY city, host_id, host_name, price) tmp WHERE rank <= 3 GROUP BY city, host_id, host_name").show()
 
         #top_three = self.spark.sql("SELECT city, price FROM (SELECT city, price, dense_rank() OVER (PARTITION BY city ORDER BY price DESC) AS rank FROM listings) tmp WHERE rank <= 2")
@@ -407,7 +537,11 @@ class airbnb():
     def get_numberOf_listingsPerHost(self):
         df = self.get_df_listings()
 
-        self.spark.sql("SELECT ROUND(COUNT(id)/COUNT(DISTINCT host_id), 2) FROM listings").show()
+        #sql
+        results = self.spark.sql("SELECT ROUND(COUNT(id)/COUNT(DISTINCT host_id), 2) FROM listings")
+
+        #save to file
+        self.save_toFile(results, "4a.csv")
 
     #GET PERCENTAGE OF HOSTS WITH MORE THAN 1 LISTING(4b)
     def get_percentage_listingsPerHost_moreThanOne(self):
@@ -427,7 +561,12 @@ class airbnb():
         df_joined = total_hosts.join(hosts_moreThanOne, total_hosts.total != hosts_moreThanOne.part)
         df_joined.createOrReplaceTempView("joined")
 
-        self.spark.sql("SELECT ROUND((part/total)*100, 2) AS percentage FROM joined").show()
+        results = self.spark.sql("SELECT ROUND((part/total)*100, 2) AS percentage FROM joined")
+
+        #save to file
+        self.save_toFile(results, "4b.csv")
+
+
 
     #GET ESTIMATED AMOUNT SPENT ON ACCOMODATION PER YEAR FOR EACH CITY(3e)
     def get_amountSpent_accomodationPerYear(self):
@@ -499,7 +638,10 @@ class airbnb():
         #sql
         #df_joined.createOrReplaceTempView("joined")
         #results = self.spark.sql("SELECT city, ROUND(SUM(reviews_per_month)/COUNT(DISTINCT date), 2) AS avg_reviewsPerMonth FROM joined GROUP BY city").show()
-        self.spark.sql("SELECT city, ROUND(AVG(reviews_per_month)) as avg_reviewsPerMonth FROM listings GROUP BY city").show()
+        results = self.spark.sql("SELECT city, ROUND(AVG(reviews_per_month)) as avg_reviewsPerMonth FROM listings GROUP BY city")
+
+        #save to file
+        self.save_toFile(results, "3c.csv")
 
     #GET AVERAGE BOOKING PRICE PER NIGHT FOR EACH CITY(3a)
     def get_avg_bookingPrice(self):
@@ -507,13 +649,10 @@ class airbnb():
         df = df.filter("price > 0")
 
         #sql
-        results = self.spark.sql("SELECT city, ROUND(AVG(price), 2) AS avg_Price FROM listings GROUP BY city ORDER BY AVG(price) DESC").show()
-        return
+        results = self.spark.sql("SELECT city, ROUND(AVG(price), 2) AS avg_bookingPrice FROM listings GROUP BY city ORDER BY AVG(price) DESC")
 
-        #print results
-        results.show()
-        for line in results:
-            print line
+        #save to file
+        self.save_toFile(results, "3a.csv")
 
     #GET AVERAGE BOOKING PRICE PER ROOM TYPE PER NIGHT FOR EACH CITY(3b)
     def get_avg_bookingPrice_roomType(self):
@@ -521,39 +660,34 @@ class airbnb():
         df = df.filter("price > 0")
 
         #sql
-        df = self.spark.sql("SELECT city, room_type, AVG(price) FROM listings GROUP BY city, room_type").collect()
+        results = self.spark.sql("SELECT city, room_type, AVG(price) AS avg_bookingPrice_roomType FROM listings GROUP BY city, room_type")
 
-        #print results
-        for line in results:
-            print line
+        #save to file
+        self.save_toFile(results, "3b.csv")
 
     #GET ALL CITY NAMES(2c)
     def get_cityNames(self):
         df = self.get_df_listings()
-
         df = df.filter(length("city") > 0)
 
         #sql
-        results = self.spark.sql("SELECT city FROM listings GROUP BY city").collect()
+        results = self.spark.sql("SELECT city FROM listings GROUP BY city")
+        #results.show()
 
-        #print results
-        print results
+        #save to file
+        self.save_toFile(results, "2c_p2.csv")
 
 
     #GET NUMBER OF UNIQUE CITY NAMES(2c)
     def get_numberOf_distinct_cityNames(self):
         df = self.get_df_listings()
-
         df = df.filter(length("city") > 0)
 
         #sql
-        results = self.spark.sql("SELECT COUNT(DISTINCT city) from listings").collect()
-        print results
-        return
-        #count = df.agg(countDistinct("city"))
+        results = self.spark.sql("SELECT COUNT(DISTINCT city) AS numberOf_distinctCities FROM listings")
 
-        #print result
-        print(count.collect())
+        #save to file
+        self.save_toFile(results, "2c_p1.csv")
 
     #GET NUMBER OF DISTINCT VALUES IN EACH COLUMN(2b)
     def get_numberOf_distinct_values(self):
@@ -567,8 +701,10 @@ class airbnb():
             res_list.append(result)
         print(res_list)
 
-
-
+    #SAVE DATAFRAME TO FILE
+    def save_toFile(self, dataframe, filename):
+        dataframe = dataframe.repartition(1)
+        dataframe.write.format("csv").option("header", "true").option("delimiter", ",").save(filename)
 
     #FIND AVERAGE NUMBER OF REVIEWS PER MONTH FOR EACH CITY(3c)
 
@@ -685,4 +821,4 @@ def distinct_count_calendar():
 
 if __name__ == "__main__":
     airbnb = airbnb()
-    airbnb.get_foreignKeys()
+    airbnb.get_neighborhoodComparison()

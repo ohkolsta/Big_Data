@@ -2,3 +2,4 @@ datasets
 airbnb_tests
 metastore_db
 *.log
+*.csv
